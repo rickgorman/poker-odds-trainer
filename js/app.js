@@ -39,8 +39,12 @@ window.PT = window.PT || {};
     return (fraction * 100).toFixed(1);
   }
 
-  function winChanceText(equity) {
-    return percent(equity.winChance) + '% (' + equity.outs + ' / ' + equity.remaining + ')';
+  function winChanceText(equity, isGuaranteedWin) {
+    const pct = percent(equity.winChance) + '%';
+    if (isGuaranteedWin) {
+      return pct;
+    }
+    return pct + ' (' + equity.outs + ' / ' + equity.remaining + ')';
   }
 
   function callLabel(value) {
@@ -143,6 +147,8 @@ window.PT = window.PT || {};
 
   function feedbackRows() {
     const equity = current.equity;
+    const isGuaranteedWin = equity.outs === equity.remaining;
+    const displayedOuts = isGuaranteedWin ? 0 : equity.outs;
     const rows = [];
 
     if (current.mode === MODE.ODDS) {
@@ -151,10 +157,11 @@ window.PT = window.PT || {};
       rows.push(feedbackRow('Selected answer ' + answered.selected, answered.selected));
     }
 
-    rows.push(feedbackRow('Win outs ' + equity.outs, equity.outs));
+    rows.push(feedbackRow('Win outs ' + displayedOuts, displayedOuts));
     rows.push(feedbackRow('Pushes ' + equity.pushes, equity.pushes));
     rows.push(feedbackRow('Remaining cards ' + equity.remaining, equity.remaining));
-    rows.push(feedbackRow('Win chance ' + winChanceText(equity), winChanceText(equity)));
+    const wcText = winChanceText(equity, isGuaranteedWin);
+    rows.push(feedbackRow('Win chance ' + wcText, wcText));
 
     if (current.mode === MODE.BET) {
       const reqText = percent(current.requiredEquity) + '%';
@@ -199,6 +206,12 @@ window.PT = window.PT || {};
   }
 
   function revealBlock() {
+    const equity = current.equity;
+    const isGuaranteedWin = equity.outs === equity.remaining;
+    const hasWinningCards = !isGuaranteedWin && equity.winningCards.length > 0;
+    const feedbackNote = isGuaranteedWin
+      ? '<p class="feedback-note">Already winning on every remaining card.</p>'
+      : '<p class="feedback-note">Pushes are neutral and do not count as wins.</p>';
     const resultClass = answered.correct ? 'result-correct' : 'result-miss';
     const resultText = answered.correct ? 'Correct' : 'Incorrect';
     return (
@@ -207,8 +220,8 @@ window.PT = window.PT || {};
       '<dl class="feedback-list">' + feedbackRows() + '</dl>' +
       brookNote() +
       willNote() +
-      '<p class="feedback-note">Pushes are neutral and do not count as wins.</p>' +
-      winningCardsSection() +
+      feedbackNote +
+      (hasWinningCards ? winningCardsSection() : '') +
       '<button class="next-button" type="button" data-action="next">Next</button>' +
       '</div>'
     );

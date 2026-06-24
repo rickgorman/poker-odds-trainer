@@ -150,7 +150,10 @@ PT.scenario = (function () {
       attempt += 1;
       const scenario = build(deal(normalizedMode, rng.makeSeed()), options);
       if (!scenario.error) {
-        return scenario;
+        const eq = scenario.equity;
+        if (eq.outs > 0 && eq.outs < eq.remaining) {
+          return scenario;
+        }
       }
     }
     return build(deal(normalizedMode, rng.makeSeed()), options);
