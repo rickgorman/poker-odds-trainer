@@ -68,7 +68,7 @@ button:disabled {
   gap: 10px;
 }
 
-.brook-toggle {
+.setting-toggle {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -78,7 +78,7 @@ button:disabled {
   user-select: none;
 }
 
-.brook-toggle input {
+.setting-toggle input {
   width: 16px;
   height: 16px;
   accent-color: rgb(23, 48, 36);

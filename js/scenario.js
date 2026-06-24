@@ -15,6 +15,8 @@ PT.scenario = (function () {
   const CHOICE_COUNT = 3;
   const MIN_DISTRACTOR_GAP = 5;
   const MAX_DISTRACTOR_GAP = 32;
+  const WILL_WIN_BOOST = 8;
+  const MAX_WIN_PERCENT = 100;
 
   function deal(mode, seed) {
     const random = rng.fromString(seed + ':deal');
@@ -121,7 +123,11 @@ PT.scenario = (function () {
     };
 
     if (mode === MODE.ODDS) {
-      scenario.correctPercent = Math.round(result.winChance * 100);
+      scenario.basePercent = Math.round(result.winChance * 100);
+      scenario.willOnPhone = settings.willOnPhone === true;
+      scenario.correctPercent = scenario.willOnPhone
+        ? Math.min(MAX_WIN_PERCENT, scenario.basePercent + WILL_WIN_BOOST)
+        : scenario.basePercent;
       scenario.choices = buildChoices(seed, scenario.correctPercent);
     } else {
       scenario.requiredEquity = equity.requiredEquity(params.pot, params.call);

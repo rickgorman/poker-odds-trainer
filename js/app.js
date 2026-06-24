@@ -14,9 +14,10 @@ window.PT = window.PT || {};
   let answered = null; // { selected, correct }
   let showWinningCards = false;
   let brookInHand = profile.settings.brookInHand === true;
+  let willOnPhone = profile.settings.willOnPhone === true;
 
   function buildOptions() {
-    return { brookInHand };
+    return { brookInHand, willOnPhone };
   }
 
   function paramsOf(scenario) {
@@ -186,6 +187,16 @@ window.PT = window.PT || {};
     return '<p class="feedback-note">Brook is in the hand — calling is always correct.</p>';
   }
 
+  function willNote() {
+    if (current.mode !== MODE.ODDS || !current.willOnPhone) {
+      return '';
+    }
+    return (
+      '<p class="feedback-note">Will is on his phone — win chance boosted 8% (' +
+      current.basePercent + '% → ' + current.correctPercent + '%).</p>'
+    );
+  }
+
   function revealBlock() {
     const resultClass = answered.correct ? 'result-correct' : 'result-miss';
     const resultText = answered.correct ? 'Correct' : 'Incorrect';
@@ -194,6 +205,7 @@ window.PT = window.PT || {};
       '<div class="' + resultClass + '">' + resultText + '</div>' +
       '<dl class="feedback-list">' + feedbackRows() + '</dl>' +
       brookNote() +
+      willNote() +
       '<p class="feedback-note">Pushes are neutral and do not count as wins.</p>' +
       winningCardsSection() +
       '<button class="next-button" type="button" data-action="next">Next</button>' +
@@ -237,14 +249,20 @@ window.PT = window.PT || {};
     );
   }
 
-  function brookToggle() {
-    const checked = brookInHand ? ' checked' : '';
+  function toggleControl(action, label, checked) {
     return (
-      '<label class="brook-toggle">' +
-      '<input type="checkbox" data-action="brook"' + checked + ' />' +
-      '<span>Brook in the hand</span>' +
+      '<label class="setting-toggle">' +
+      '<input type="checkbox" data-action="' + action + '"' + (checked ? ' checked' : '') + ' />' +
+      '<span>' + label + '</span>' +
       '</label>'
     );
+  }
+
+  function modeToggle() {
+    if (current && current.mode === MODE.BET) {
+      return toggleControl('brook', 'Brook in the hand', brookInHand);
+    }
+    return toggleControl('will', 'Will is on his phone', willOnPhone);
   }
 
   function topBar() {
@@ -252,7 +270,7 @@ window.PT = window.PT || {};
       '<header class="top-bar">' +
       '<div><h1>Odds</h1>' + statsLine() + '</div>' +
       '<div class="top-bar-controls">' +
-      brookToggle() +
+      modeToggle() +
       '<div class="mode-buttons" aria-label="Mode">' +
       modeButton('Odds', MODE.ODDS) +
       modeButton('Bet', MODE.BET) +
@@ -342,6 +360,16 @@ window.PT = window.PT || {};
     render();
   }
 
+  function setWill(value) {
+    willOnPhone = value;
+    profile.settings.willOnPhone = value;
+    profileStore.save(profile);
+    if (current && !answered) {
+      current = scenario.build(paramsOf(current), buildOptions());
+    }
+    render();
+  }
+
   root.addEventListener('click', (event) => {
     const trigger = event.target.closest('[data-action]');
     if (!trigger) {
@@ -361,9 +389,14 @@ window.PT = window.PT || {};
   });
 
   root.addEventListener('change', (event) => {
-    const toggle = event.target.closest('[data-action="brook"]');
-    if (toggle) {
+    const toggle = event.target.closest('[data-action]');
+    if (!toggle) {
+      return;
+    }
+    if (toggle.dataset.action === 'brook') {
       setBrook(toggle.checked);
+    } else if (toggle.dataset.action === 'will') {
+      setWill(toggle.checked);
     }
   });
 
