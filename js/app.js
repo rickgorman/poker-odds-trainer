@@ -13,6 +13,7 @@ window.PT = window.PT || {};
   let current = null;
   let answered = null; // { selected, correct }
   let showWinningCards = false;
+  // Toggles persist across loads; absent setting defaults to off.
   let brookInHand = profile.settings.brookInHand === true;
   let willOnPhone = profile.settings.willOnPhone === true;
 
