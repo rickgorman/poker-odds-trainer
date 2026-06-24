@@ -1,0 +1,174 @@
+name: Upstream feature sync
+
+# Scans Will's repo (wshaver/odds) once a day. If it has new commits touching
+# app source, files an issue with the upstream diff and assigns it to the
+# GitHub Copilot coding agent, which opens a PR porting the feature into this
+# vanilla-JS app. Nothing is auto-merged — a human reviews the PR.
+#
+# Schedule: 0 20 * * * UTC = 12:00 PST (UTC-8). NOTE: GitHub cron has no
+# timezone and does not follow DST, so during Pacific DST (PDT, ~Mar–Nov) this
+# fires at 13:00 Pacific. For noon during PDT use '0 19 * * *' instead.
+#
+# Optional secret FEATURE_SYNC_TOKEN: a PAT (repo + issues). The Copilot agent
+# is more reliably triggered when the assignment is made by a PAT than by the
+# default GITHUB_TOKEN. Falls back to GITHUB_TOKEN if the secret is absent.
+
+on:
+  schedule:
+    - cron: '0 20 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: upstream-feature-sync
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: wshaver/odds
+  UPSTREAM_BRANCH: main
+  BASELINE_FILE: .feature-sync/upstream-last-seen.txt
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scan upstream and build feature brief
+        id: scan
+        env:
+          GH_TOKEN: ${{ secrets.FEATURE_SYNC_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+
+          current=$(gh api "repos/$UPSTREAM/commits/$UPSTREAM_BRANCH" --jq .sha)
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+
+          baseline=""
+          if [ -f "$BASELINE_FILE" ]; then
+            baseline=$(tr -d '[:space:]' < "$BASELINE_FILE")
+          fi
+          echo "baseline: '$baseline'  current: '$current'"
+
+          if [ -z "$baseline" ]; then
+            echo "First run — seeding baseline, no issue."
+            echo "mode=seed" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$baseline" = "$current" ]; then
+            echo "No upstream change."
+            echo "mode=none" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          gh api "repos/$UPSTREAM/compare/$baseline...$current" > compare.json
+
+          # Count changed files that aren't pure docs / CI config.
+          worth=$(jq '[.files[].filename
+            | select(test("\\.md$|^LICENSE|^\\.github/|^\\.gitignore$") | not)]
+            | length' compare.json)
+          echo "worthwhile source files changed: $worth"
+
+          if [ "$worth" -eq 0 ]; then
+            echo "Only docs/config changed — advancing baseline, no issue."
+            echo "mode=skip" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "mode=port" >> "$GITHUB_OUTPUT"
+
+          title=$(gh api "repos/$UPSTREAM/commits/$current" --jq '.commit.message' | head -1)
+          echo "title=$title" >> "$GITHUB_OUTPUT"
+
+          # --- assemble issue body ---
+          {
+            echo "## Port new upstream feature into our app"
+            echo
+            echo "Automated daily scan found new commits in upstream \`$UPSTREAM\`."
+            echo
+            echo "**@copilot** please:"
+            echo
+            echo "1. Read the upstream diff below and identify any **new user-facing feature(s)**."
+            echo "2. Implement the equivalent in THIS repo's vanilla-JS app — \`js/*.js\`, \`styles.css\`, \`index.html\`. Match existing conventions: namespaced \`PT\` modules, no build step, mobile-first CSS, hash routing, deterministic seeded scenarios, localStorage profile."
+            echo "3. Where logic is involved, mirror it in the existing test style (see how the engine is exercised)."
+            echo "4. Bump the \`?v=N\` cache-buster on every changed \`js/\` and \`styles.css\` reference in \`index.html\`."
+            echo "5. Open a PR. **Do not auto-merge** — a human reviews."
+            echo
+            echo "If the upstream change is a refactor/chore/docs and not a feature, comment to say so and skip."
+            echo
+            echo "Upstream is React+Vite; this repo is dependency-free vanilla JS — port the *behavior*, not the framework code."
+            echo
+            echo "---"
+            echo
+            echo "Upstream changed: **$(jq '.commits | length' compare.json) commit(s)**, **$(jq '.files | length' compare.json) file(s)**."
+            echo
+            echo "Compare: https://github.com/$UPSTREAM/compare/$baseline...$current"
+            echo
+            echo "### Commits"
+            jq -r '.commits[] | "- `\(.sha[0:7])` \(.commit.message | split("\n")[0])"' compare.json
+            echo
+            echo "### Changed files"
+            jq -r '.files[] | "- `\(.filename)` (+\(.additions)/-\(.deletions), \(.status))"' compare.json
+            echo
+            echo "### Diff (truncated to 55k)"
+            echo '```diff'
+            jq -r '.files[] | "--- " + .filename + "\n" + (.patch // "(no textual patch)")' compare.json | head -c 55000
+            echo
+            echo '```'
+          } > issue_body.md
+
+      - name: Open issue and assign Copilot
+        if: steps.scan.outputs.mode == 'port'
+        env:
+          GH_TOKEN: ${{ secrets.FEATURE_SYNC_TOKEN || github.token }}
+          OWNER: ${{ github.repository_owner }}
+          NAME: ${{ github.event.repository.name }}
+          REPO: ${{ github.repository }}
+          TITLE: ${{ steps.scan.outputs.title }}
+        run: |
+          set -euo pipefail
+
+          gh label create upstream-sync --color 6f42c1 \
+            --description "Automated upstream feature sync" 2>/dev/null || true
+
+          safe_title=$(printf '%s' "$TITLE" | cut -c1-80)
+          url=$(gh issue create \
+            --title "Upstream feature sync: $safe_title" \
+            --body-file issue_body.md \
+            --label upstream-sync)
+          echo "Created $url"
+          num=$(printf '%s' "$url" | grep -oE '[0-9]+$')
+
+          node=$(gh api "repos/$REPO/issues/$num" --jq .node_id)
+          bot=$(gh api graphql \
+            -f query='query($o:String!,$n:String!){repository(owner:$o,name:$n){suggestedActors(capabilities:[CAN_BE_ASSIGNED],first:100){nodes{login __typename ... on Bot{id} ... on User{id}}}}}' \
+            -f o="$OWNER" -f n="$NAME" \
+            --jq '.data.repository.suggestedActors.nodes[] | select(.login=="copilot-swe-agent") | .id')
+
+          if [ -z "$bot" ]; then
+            echo "::warning::Copilot coding agent not assignable on this repo — issue #$num created but unassigned. Enable Copilot coding agent, then assign @copilot manually."
+            exit 0
+          fi
+
+          gh api graphql -f query="mutation { replaceActorsForAssignable(input: {assignableId: \"$node\", actorIds: [\"$bot\"]}) { assignable { ... on Issue { number assignees(first:5){ nodes{ login } } } } } }"
+          echo "Assigned copilot-swe-agent to issue #$num"
+
+      - name: Advance baseline
+        if: steps.scan.outputs.mode == 'seed' || steps.scan.outputs.mode == 'skip' || steps.scan.outputs.mode == 'port'
+        env:
+          CURRENT: ${{ steps.scan.outputs.current }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$BASELINE_FILE")"
+          printf '%s\n' "$CURRENT" > "$BASELINE_FILE"
+          if git diff --quiet -- "$BASELINE_FILE"; then
+            echo "Baseline already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$BASELINE_FILE"
+          git commit -m "chore: advance upstream feature-sync baseline to ${CURRENT:0:7}"
+          git push
