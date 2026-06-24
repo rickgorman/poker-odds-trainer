@@ -117,7 +117,7 @@ window.PT = window.PT || {};
     return ['Call', 'Fold']
       .map((action) => {
         const classes = ['answer-button'];
-        if (action === 'Call' && current.brookInHand) {
+        if (action === 'Call' && brookInHand) {
           classes.push('call-orbit');
         }
         if (answered) {
