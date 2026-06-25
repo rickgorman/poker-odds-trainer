@@ -108,10 +108,61 @@ The build_prompt MUST:
 - Respect the repo's conventions (no build step if there isn't one; match existing module and style patterns).
 - Include concrete, checkable acceptance criteria.
 - Say how to verify it (manual steps and/or tests in the repo's existing style).
-- End by instructing the agent to open a pull request and NOT auto-merge — a human reviews.
+- Focus only on WHAT to build and how to verify it. Do NOT spell out the build/test/review/PR process — a standard delivery workflow is appended automatically after your text.
 - May use triple-backtick code blocks, but MUST NEVER use four or more consecutive backticks.
-Keep build_prompt under ~5000 characters.
+Keep build_prompt under ~4500 characters.
 SYS
+
+# --- 2b. The delivery workflow appended to every build-prompt ----------------
+# A fixed, repo-agnostic build -> test/QA -> self-review -> PR process, distilled
+# from a production agent pipeline (plan-refinement passes + self-review gates).
+# Appended verbatim so every issue ships the same solid workflow regardless of
+# what feature the model dreamed up.
+
+read -r -d '' DELIVERY_WORKFLOW <<'FLOW' || true
+
+═══════════════════════════════════════════════════════════════════════
+DELIVERY WORKFLOW — run these stages in order; do not skip ahead.
+Quality bar throughout: senior-engineer review at a top-tier shop. Minimum, not aspirational.
+═══════════════════════════════════════════════════════════════════════
+
+STAGE 0 — REFINE THE PLAN (before writing any code)
+Draft an implementation plan, then sharpen it across four rotating lenses, in order.
+Do NOT settle before the ADVERSARIAL pass has run at least once.
+  1. USER INTENT       — does the plan deliver the actual user-visible behavior? Name the files you will touch and trace the execution path end to end.
+  2. ADVERSARIAL       — attack the plan. Unhandled edge cases? nil / empty / malformed input? race conditions? partial or half-applied states? Which assumptions break at runtime?
+  3. TECHNICAL REALITY — does it fit THIS repo's real stack, conventions, and idioms? Is every step actually executable here? Add no new dependency or build step unless the repo already uses one.
+  4. CONSOLIDATION     — merge the findings into the SMALLEST plan that still satisfies every acceptance criterion.
+
+STAGE 1 — BUILD (Code Diet Protocol)
+  - Write the simplest version that satisfies the acceptance criteria.
+  - No premature abstractions, no speculative error handling. Justify any addition beyond minimal in one sentence — if you cannot, delete it.
+  - Match the surrounding code's naming, structure, and conventions. Production-ready, not a prototype.
+  - Run the relevant test(s) after each change.
+  - Note any out-of-scope bug or improvement you spot, but do NOT fix it here.
+
+STAGE 2 — TEST & QA
+  - Add or extend tests in the repo's existing test style.
+  - No test theater: every test must FAIL if the implementation is removed. Avoid assertions on mocked return values, phantom coverage, and tests coupled to internal calls. Cover error paths, nil/empty, and boundaries — not just the happy path.
+  - Run the full test suite, plus lint / build / typecheck if the repo has them. Then manually exercise each acceptance criterion.
+
+STAGE 3 — SELF-REVIEW GATES
+Review your OWN diff with fresh, skeptical eyes. Trace through imports, callers, and dependents — not just the changed lines. Apply each gate, fix what it finds, then re-run STAGE 2:
+  - SENIOR REVIEW — naming, structure, idioms, convention adherence, test quality. Diagnose root causes, surface the pattern, not just the instance.
+  - SIMPLICITY    — inline single-caller indirection, delete defensive code for impossible states, remove anything that does not earn its place. Behavior must stay identical; show a before/after for each cut.
+  - SECURITY      — injection, secrets committed to code, missing authorization, unsafe handling of untrusted input.
+Loop BUILD → TEST → REVIEW until every gate is clean.
+
+STAGE 4 — SHIP A DRAFT PR  (never auto-merge — a human reviews)
+  - Create a branch and commit with a conventional message: "<type>: <concise description>", under 72 chars (feat / fix / refactor / docs / test / chore).
+  - Push and open a DRAFT pull request whose body has:
+      ## Why          — who benefits and the problem solved
+      ## What         — the observable change and the acceptance criteria
+      ## How it works — implementation approach and key decisions
+      ## Review notes — anything risky, plus any self-review finding you deliberately deferred
+  - If the repo runs CI, wait for it; on failure, read the logs, fix, and push again until green.
+  - STOP at draft. Do not merge.
+FLOW
 
 # --- 3. Call the model ------------------------------------------------------
 
@@ -177,10 +228,11 @@ $snapshot"
     echo
     echo "### ⤵️ Build it — copy this entire block into Claude Code, Cursor, or any coding agent"
     echo
-    echo "The prompt below is fully self-contained. One copy, one paste, and the agent specs, builds, and opens a PR."
+    echo "The block below is fully self-contained: the feature spec, plus a battle-tested delivery workflow — refine-the-plan (4 lenses) → build → test/QA → self-review gates → draft PR. One copy, one paste."
     echo
     echo '````text'
     printf '%s\n' "$build_prompt"
+    printf '%s\n' "$DELIVERY_WORKFLOW"
     echo '````'
     echo
     echo "<sub>🤖 Auto-proposed by the nightly feature-proposer workflow. Nothing is auto-merged — the agent opens a PR for human review.</sub>"
