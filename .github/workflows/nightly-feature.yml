@@ -1,0 +1,51 @@
+name: Nightly feature proposer
+
+# Every night, reads the current state of THIS repo and asks a model to invent
+# one high-leverage, shippable feature. Files an issue whose body holds a single
+# self-contained build-prompt in one copy-to-clipboard block — paste it into any
+# coding agent (Claude Code, Cursor, Copilot) and it builds the feature and opens
+# a PR. Nothing is auto-merged; a human reviews.
+#
+# The prompt is repo-agnostic: it infers the stack, conventions, and domain from
+# a snapshot. Copy this workflow + .github/scripts/propose-feature.sh into any
+# repository and it just works.
+#
+# Inference runs on GitHub Models (`gh models run`) using the built-in
+# GITHUB_TOKEN with `models: read` — no API keys, no secrets to configure.
+#
+# Schedule: '0 11 * * *' UTC = 03:00 PST (UTC-8). GitHub cron has no timezone and
+# ignores DST, so during Pacific DST (PDT, ~Mar–Nov) this fires at 04:00 Pacific.
+# For 03:00 during PDT use '0 10 * * *' instead.
+
+on:
+  schedule:
+    - cron: '0 11 * * *'
+  workflow_dispatch:
+    inputs:
+      model:
+        description: 'Model id for gh models run'
+        required: false
+        default: 'openai/gpt-4.1'
+
+permissions:
+  contents: read
+  issues: write
+  models: read
+
+concurrency:
+  group: nightly-feature-proposer
+  cancel-in-progress: false
+
+jobs:
+  propose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 50
+
+      - name: Propose tonight's feature
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODEL: ${{ github.event.inputs.model || 'openai/gpt-4.1' }}
+        run: bash .github/scripts/propose-feature.sh
